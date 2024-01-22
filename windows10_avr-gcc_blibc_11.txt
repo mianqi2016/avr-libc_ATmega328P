@@ -1,0 +1,238 @@
+在 Windows 10 上用 avr-gcc 和 avr-libc 给 ATmega328p 编程的整个流程 - 11
+
+用 avr-libc 写的 Ring Buffer - 由 7 个文件组成：
+
+1、main-test.c
+
+#ifndef F_CPU
+#define F_CPU 16000000UL
+#endif
+
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
+
+#include <stdlib.h> //atoi & itoa
+#include <string.h> //strcpy()
+
+#include "init.h"
+#include "uart.h"
+#include "ringBuffer.h"
+
+unsigned int sampleTicks = 0;
+
+uint8_t charPut = '\0';
+
+int main(void)
+{
+  LED_Init();
+  Timer2_Init();
+  uart0_init();
+  
+  sei();
+  
+  /* Replace with your application code */
+  while (1)
+  {
+    if(sampleTicks >= 100)
+    {
+      PORTB ^= (1<<PORTB0);
+      sampleTicks = 0;
+      //TCNT0 = valueTCNT;
+      
+      charPut = remove();
+      uart0_putChar(charPut);
+    }
+    _delay_ms(10);
+  }
+}
+
+ISR(TIMER2_OVF_vect)
+{
+  ++sampleTicks;
+  TCNT2 = 200;
+}
+
+ISR(USART_RX_vect)
+{
+  uint8_t dataRecv;
+  dataRecv = UDR0;
+  add(dataRecv);
+}
+
+
+2、init.h
+
+#ifndef INIT_H_
+#define INIT_H_
+
+#include <avr/io.h>
+
+void Timer2_Init(void);
+void LED_Init(void);
+
+
+
+#endif /* INIT_H_ */
+
+
+3、init.c
+
+#include "init.h"
+
+void Timer2_Init(void)
+{
+  //The simplest mode of operation is the normal mode (WGM22:0 = 0).
+  TCCR2B |= (1<<CS22) | (1<<CS21) | (1<<CS20); // clkT2S/1024 (from prescaler)
+  TIMSK2 = (1<<TOV2);
+  TCNT2 = 0;
+}
+
+void LED_Init(void)
+{
+  DDRB |= (1<< DDB5) | (1<<DDB0);
+  //DDRB = 0b00100001; // Turn off LED_13 on Arduino UNO
+  PORTB |= (1<<PORTB0);
+  //PORTB = 0b00000001;
+}
+
+
+4、ringBuffer.h
+
+#ifndef RINGBUFFER_H_
+#define RINGBUFFER_H_
+
+#include <stdint.h>
+
+#define RING_SIZE   64
+typedef uint8_t ring_pos_t;
+volatile ring_pos_t ring_head;
+volatile ring_pos_t ring_tail;
+volatile char ring_data[RING_SIZE];
+
+int add(char c);
+int remove(void);
+
+
+5、ringBuffer.c
+
+#include "ringBuffer.h"
+
+int add(char c) {
+  ring_pos_t next_head = (ring_head + 1) % RING_SIZE;
+  if (next_head != ring_tail) {
+    /* there is room */
+    ring_data[ring_head] = c;
+    ring_head = next_head;
+    return 0;
+    } else {
+    /* no room left in the buffer */
+    return -1;
+  }
+}
+
+int remove(void) {
+  if (ring_head != ring_tail) {
+    int c = ring_data[ring_tail];
+    ring_tail = (ring_tail + 1) % RING_SIZE;
+    return c;
+    } else {
+    return -1;
+  }
+}
+
+
+6、uart.h
+
+#include <avr/io.h>
+
+#ifndef F_CPU
+//#define F_CPU 16000000UL // Defining the CPU Frequency
+#define F_CPU 16000000UL // Defining the CPU Frequency
+#endif
+
+#ifndef USART_H_
+#define USART_H_
+
+//It was tested, both 9600 and 250k work properly in this project
+#define USART_BAUDRATE 250000 // Desired Baud Rate
+#define BAUD_PRESCALER (((F_CPU / (USART_BAUDRATE * 16UL))) - 1)
+
+#define ASYNCHRONOUS (0<<UMSEL00) // USART Mode Selection
+
+#define DISABLED    (0<<UPM00)
+#define EVEN_PARITY (2<<UPM00)
+#define ODD_PARITY  (3<<UPM00)
+#define PARITY_MODE  DISABLED // USART Parity Bit Selection
+
+#define ONE_BIT (0<<USBS0)
+#define TWO_BIT (1<<USBS0)
+#define STOP_BIT ONE_BIT      // USART Stop Bit Selection
+
+#define FIVE_BIT  (0<<UCSZ00)
+#define SIX_BIT   (1<<UCSZ00)
+#define SEVEN_BIT (2<<UCSZ00)
+#define EIGHT_BIT (3<<UCSZ00)
+#define DATA_BIT   EIGHT_BIT  // USART Data Bit Selection
+
+#define RX_COMPLETE_INTERRUPT         (1<<RXCIE0)
+#define DATA_REGISTER_EMPTY_INTERRUPT (1<<UDRIE0)
+
+
+void uart0_init(void);
+uint8_t uart0_getChar(void);
+void uart0_putChar(uint8_t DataByte);
+void uart0_putString(char *str);
+
+
+#endif /* USART_H_ */
+
+
+7、uart.c
+
+#include "uart.h"
+
+void uart0_init(void)
+{
+  // Set Baud Rate
+  UBRR0H = BAUD_PRESCALER >> 8;
+  UBRR0L = BAUD_PRESCALER;
+  
+  // Set Frame Format
+  UCSR0C = ASYNCHRONOUS | PARITY_MODE | STOP_BIT | DATA_BIT;
+  
+  // Enable Receiver and Transmitter
+  UCSR0B = (1<<RXEN0) | (1<<TXEN0);
+  
+  // Enable Receiver Interrupt
+  UCSR0B |= RX_COMPLETE_INTERRUPT;
+}
+
+uint8_t uart0_getChar(void)
+{
+  uint8_t dataRecv;
+  while((UCSR0A & (1<<RXC0)) == 0) {};
+  dataRecv = UDR0;
+  return dataRecv;
+}
+
+void uart0_putChar(uint8_t DataByte)
+{
+  while((UCSR0A & (1<<UDRE0)) == 0) {}; // Do nothing until UDR is ready
+  UDR0 = DataByte;
+  while((UCSR0A & (1<<TXC0)) == 0) {}; // Do nothing until TX is completed
+}
+
+void uart0_putString(char *str)
+{
+  int i = 0;
+  
+  while(str[i] != '\0')
+  {
+    uart0_putChar(str[i]);
+    ++i;
+  }
+  uart0_putChar('\0');
+}
+
+

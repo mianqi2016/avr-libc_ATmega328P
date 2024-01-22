@@ -1,0 +1,51 @@
+在 Windows 10 上用 avr-gcc 和 avr-libc 给 ATmega328p 编程的整个流程 - 4
+
+试用一下 avrdude，有一块 Arduino UNO 有可能是新加的 ATmega328p，缺少Arduino 固件（bootloader），我用 Arduino IDE 经 Atmel ICE 编程时报错：
+
+图片
+
+
+Arduino: 1.8.19 (Windows 10), Board: "Arduino Uno"
+
+Error while burning bootloader.
+
+avrdude: WARNING: invalid value for unused bits in fuse "lock", should be set to 1 according to datasheet
+
+This behaviour is deprecated and will result in an error in future version
+
+You probably want to use 0xff instead of 0x3f (double check with your datasheet first).
+
+avrdude: verification error, first mismatch at byte 0x0000
+
+         0xff != 0xfd
+
+avrdude: verification error; content mismatch
+
+
+于是，我尝试一下命令行工具行不行。
+
+
+当前，在 Windows 10 的设备管理器中只有“Microchip Tools --> Atmel-ICE Data Gateway”， 而没有“Ports(COM & LPT)” - Arduino Uno(COMXXX)会出现在这里，但前提是要用“ATmega32U4”这个“USB-TTL”转换器。
+
+
+到这个 Windows 10 里的文件夹里去 - “C:\Program Files\avrdude-win-64bit\avrdude\driver-amd64”，运行这个文件 - “install-filter-win”:
+
+图片
+
+
+这里会出现三个跟现在插着的 ICE 有关的文件 -  input device, data gateway, and composite device with hex Id's: 03EB and 2141，分别选中，点击“install”，予以卸载。
+
+
+再次尝试，还是不行，于是，开始尝试用 Microchip Studio。
+
+先找到 “D:\Arduino\hardware\arduino\avr\bootloaders\atmega” 这里的hex文件：ATmegaBOOT_168_atmega328.hex，这个文件不行，要安装另一个：ATmegaBOOT_168_atmega328_pro_8MHz.hex
+
+
+上述 bootloader 上载之后，还要设置fuses：
+
+EXTENDED: 0x05
+HIGH: 0xDE
+LOW: 0xFF
+
+
+测试的办法就是从 Arduino IDE 中上载一下“Blink”，看闪不闪，以及能调频不能。 

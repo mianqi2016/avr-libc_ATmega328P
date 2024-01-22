@@ -1,0 +1,78 @@
+在 Windows 10 上用 avr-gcc 和 avr-libc 给 ATmega328p 编程的整个流程 - 1
+
+
+第一步：下载安装“MinGW - Minimalist GNU for Windows”
+
+地址：https://sourceforge.net/projects/mingw/
+
+
+选择“mingw32-gcc-g++”，在“MinGW Installation Manager”中的菜单栏“Installation”中点击开始安装。
+
+
+如果出现这样的提示：
+
+PS C:\MinGW\bin> gcc.exe --version
+gcc.exe : The term 'gcc.exe' is not recognized as the name of a cmdlet, function, 
+script file, or operable program. Check the spelling of the name, or if a path was 
+included, verify that the path is correct and try again.
+At line:1 char:1
++ gcc.exe --version
++ ~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (gcc.exe:String) [], CommandNotFoundEx 
+   ception
+    + FullyQualifiedErrorId : CommandNotFoundException
+
+
+先查一下路径中有没有：
+
+PS C:\> $env:Path
+C:\Program Files (x86)\STMicroelectronics\st_toolset\asm;C:\Program Files (x86)\Common
+ Files\Oracle\Java\javapath;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:
+\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Program File
+s\Microsoft VS Code\bin;C:\Program Files\PuTTY\;C:\Program Files\Git\cmd;C:\Users\MQ\A
+ppData\Local\Microsoft\WindowsApps;;C:\Program Files\JetBrains\PyCharm Community Editi
+on 2022.1.2\bin;
+
+
+如果没有，就将路径添加进去：
+
+Windows --> （右键）Start --> Settings --> Advanced system settings --> Enviroment Variables --> System variables 中添加 “C:/MinGW/bin”。这时候，可能要把 Windows PowerShell ISE 关闭-重启一下。
+
+（此处注意，有两个版本 - Windows PowerShell ISE 和 Windows PowerShell ISE（x86））
+
+
+检查一下：
+
+PS C:\Users\MQ> $env:path
+C:\Program Files (x86)\STMicroelectronics\st_toolset\asm;C:\Program Files (x86)\Common
+ Files\Oracle\Java\javapath;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:
+\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Program File
+s\Microsoft VS Code\bin;C:\Program Files\PuTTY\;C:\Program Files\Git\cmd;C:\MinGW;C:\M
+inGW\bin;C:\Users\MQ\AppData\Local\Microsoft\WindowsApps;;C:\Program Files\JetBrains\P
+yCharm Community Edition 2022.1.2\bin;
+
+PS C:\Users\MQ> gcc.exe --version
+gcc.exe (MinGW.org GCC-6.3.0-1) 6.3.0
+Copyright (C) 2016 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+
+PS C:\Users\MQ>
+
+PS C:\MinGW\BIN> objcopy.exe --version
+GNU objcopy (GNU Binutils) 2.28
+Copyright (C) 2017 Free Software Foundation, Inc.
+This program is free software; you may redistribute it under the terms of
+the GNU General Public License version 3 or (at your option) any later version.
+This program has absolutely no warranty.
+
+PS C:\MinGW\BIN> objdump.exe --version
+GNU objdump (GNU Binutils) 2.28
+Copyright (C) 2017 Free Software Foundation, Inc.
+This program is free software; you may redistribute it under the terms of
+the GNU General Public License version 3 or (at your option) any later version.
+This program has absolutely no warranty.
+
+
+备注：这一步，如果哪个模块安装不完整，比如“gcc-core-xxxx”，就要通过“Installation --> Apply Changed --> Apply”，这个流程，再装一遍。

@@ -1,0 +1,137 @@
+在 Windows 10 上用 avr-gcc 和 avr-libc 给 ATmega328p 编程的整个流程 - 6
+
+前一节说到的 “Fade” ，这节开始做，从定时器 "Timer0" 的试用开始。
+
+
+经实测可用的程序：
+
+#include<avr/io.h>
+#include<util/delay.h>
+#include<avr/interrupt.h>
+
+#define SET(port,bit) port|=(1<<bit)
+#define CLR(port,bit) port&=~(1<<bit)
+#define TOGGLE(PORT,BIT) PORT^=(1<<BIT)
+
+
+int count=0;
+void timer0_init()
+{
+  CLR(TCCR0A,WGM00);//SET TIMER0 TO NORMAL MODE
+  CLR(TCCR0A,WGM01);
+  CLR(TCCR0B,WGM02);
+  TCNT0=0X00;
+  SET(SREG,7);
+  SET(TIMSK0,TOIE0); // overflow interrupt enable
+}
+
+void enable_timer()
+{
+  SET(TCCR0B,CS00);//set prescalar to 1024
+  CLR(TCCR0B,CS01);
+  SET(TCCR0B,CS02);
+}
+
+int main()
+{
+  DDRD|=(1<<PD6); //LED CONNECTED TO DIGITAL PIN 6 ,and all the
+                  //bits of the port is set so as to make it an 
+                  //output port
+  timer0_init();
+  enable_timer();
+  Serial.begin(9600);
+
+  //_delay_ms(1000);
+
+  while(1)
+  {
+    //Serial.println(PORTD);
+    _delay_ms(10);
+
+     if(count==62)
+    {
+      TOGGLE(PORTD,PD6);
+      count=0;
+    }  
+  }
+}
+
+ISR(TIMER0_OVF_vect)
+{
+ count++; 
+}
+
+
+这个程序中最有趣的部分是第42行的：
+
+    _delay_ms(10);
+
+如果没有它，就需要第35和41两行的打印代码，否则这个程序上载到 UNO 上以后没有任何反应，但在 TinkerCAD 里仿真的时候确实可行地。更出乎意料的是，如果将上面的程序写成 Arduino 的格式：
+
+#include<avr/io.h>
+#include<util/delay.h>
+#include<avr/interrupt.h>
+
+#define SET(port,bit) port|=(1<<bit)
+#define CLR(port,bit) port&=~(1<<bit)
+#define TOGGLE(PORT,BIT) PORT^=(1<<BIT)
+
+
+int count=0;
+void timer0_init()
+{
+  CLR(TCCR0A,WGM00);//SET TIMER0 TO NORMAL MODE
+  CLR(TCCR0A,WGM01);
+  CLR(TCCR0B,WGM02);
+  TCNT0=0X00;
+  SET(SREG,7);
+  SET(TIMSK0,TOIE0); // overflow interrupt enable
+}
+
+void enable_timer()
+{
+  SET(TCCR0B,CS00);//set prescalar to 1024
+  CLR(TCCR0B,CS01);
+  SET(TCCR0B,CS02);
+}
+
+void setup()
+{
+  DDRD|=(1<<PD6); //LED CONNECTED TO DIGITAL PIN 6 ,and all the
+                  //bits of the port is set so as to make it an 
+                  //output port
+  timer0_init();
+  enable_timer();
+  Serial.begin(9600);
+
+  //_delay_ms(1000);
+}
+
+void loop()
+{
+    //Serial.println(PORTD);
+    _delay_ms(10);
+
+     if(count==62)
+    {
+      TOGGLE(PORTD,PD6);
+      count=0;
+    }  
+  }
+
+ISR(TIMER0_OVF_vect)
+{
+ count++; 
+}
+
+那编译都会通不过：
+
+wiring.c.o (symbol from plugin): In function `__vector_16':
+(.text+0x0): multiple definition of `__vector_16'
+C:\Users\MQ\AppData\Local\Temp\arduino-sketch-CEFDEBA1A8B267A4DA003B72C846A625\sketch\testTimer0BlinkLED.ino.cpp.o (symbol from plugin):(.text+0x0): first defined here
+collect2.exe: error: ld returned 1 exit status
+
+exit status 1
+
+Compilation error: exit status 1
+

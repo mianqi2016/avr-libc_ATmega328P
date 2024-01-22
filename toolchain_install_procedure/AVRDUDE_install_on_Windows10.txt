@@ -1,0 +1,105 @@
+在 Windows 10 上用 avr-gcc 和 avr-libc 给 ATmega328p 编程的整个流程 - 3
+
+（5）AVRDUDE – on Windows
+
+下载地址 - https://fab.cba.mit.edu/classes/863.16/doc/projects/ftsmin/avrdude-win-64bit.zip
+
+下载的文件名：avrdude-win-64bit（压缩文件），解压后复制到“”，将这个路径 - C:\Program Files\avrdude-win-64bit\avrdude - 添加到“PATH”，重启一下 Windows PowerShell ISE 核实一下：
+
+PS C:\Users\MQ> avrdude
+avrdude : Usage: avrdude.exe [options]
+At line:1 char:1
++ avrdude
++ ~~~~~~~
+    + CategoryInfo          : NotSpecified: (Usage: avrdude.exe [options]:String) [], RemoteExcep 
+   tion
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Options:
+  -p <partno>                Required. Specify AVR device.
+  -b <baudrate>              Override RS-232 baud rate.
+  -B <bitclock>              Specify JTAG/STK500v2 bit clock period (us).
+  -C <config-file>           Specify location of configuration file.
+  -c <programmer>            Specify programmer type.
+  -D                         Disable auto erase for flash memory
+  -i <delay>                 ISP Clock Delay [in microseconds]
+  -P <port>                  Specify connection port.
+  -F                         Override invalid signature check.
+  -e                         Perform a chip erase.
+  -O                         Perform RC oscillator calibration (see AVR053). 
+  -U <memtype>:r|w|v:<filename>[:format]
+                             Memory operation specification.
+                             Multiple -U options are allowed, each request
+                             is performed in the order specified.
+  -n                         Do not write anything to the device.
+  -V                         Do not verify.
+  -u                         Disable safemode, default when running from a script.
+  -s                         Silent safemode operation, will not ask you if
+                             fuses should be changed back.
+  -t                         Enter terminal mode.
+  -E <exitspec>[,<exitspec>] List programmer exit specifications.
+  -x <extended_param>        Pass <extended_param> to programmer.
+  -y                         Count # erase cycles in EEPROM.
+  -Y <number>                Initialize erase cycle # in EEPROM.
+  -v                         Verbose output. -v -v for more.
+  -q                         Quell progress output. -q -q for less.
+  -?                         Display this usage.
+avrdude version 5.11, URL: <http://savannah.nongnu.org/projects/avrdude/>
+
+PS C:\Users\MQ>
+
+
+（6）GDB for the AVR target
+
+进入目录运行 - “PS C:\MinGW\libexec\mingw-get> .\guimain.exe”
+
+在选项“MinGW --> MinGW Base System --> Mingw Source-Level Debugger”中选择“mingw32-gdb”，在“Installation --> Apply Changes --> Apply”。
+
+安装过程中有一次中断，再次运行之后，安装完成，但出现这样的提示：
+
+install: libz-1.2.8-1-mingw32-dll-1.tar
+ installing libz-1.2.8-1-mingw32-dll-1.tar
+mingw-get-gui: *** ERROR *** C:\MinGW\/bin/zlib1.dll: extraction failed
+mingw-get-gui: *** ERROR *** C:\MinGW\/bin/zlib1.dll: probable package conflict; existing file not overwritten
+install: gdb-7.6.1-1-mingw32-bin.tar.lzma
+ installing gdb-7.6.1-1-mingw32-bin.tar.lzma
+
+但是，验证还是能通过：
+
+PS C:\MinGW\libexec\mingw-get> .\guimain.exe
+
+PS C:\MinGW\libexec\mingw-get> gdb --version
+GNU gdb (GDB) 7.6.1
+Copyright (C) 2013 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.  Type "show copying"
+and "show warranty" for details.
+This GDB was configured as "mingw32".
+For bug reporting instructions, please see:
+<http://www.gnu.org/software/gdb/bugs/>.
+
+PS C:\MinGW\libexec\mingw-get>
+
+
+在另一台机子上试了一下，正确无误的安装之后的验证是这样：
+
+
+PS C:\MinGW\LIBEXEC\mingw-get> ./guimain.exe
+
+PS C:\MinGW\LIBEXEC\mingw-get> gdb --version
+GNU gdb (GDB) 7.6.1
+Copyright (C) 2013 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.  Type "show copying"
+and "show warranty" for details.
+This GDB was configured as "mingw32".
+For bug reporting instructions, please see:
+<http://www.gnu.org/software/gdb/bugs/>.
+
+PS C:\MinGW\LIBEXEC\mingw-get>
+
+
+
+

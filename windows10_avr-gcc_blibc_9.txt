@@ -1,0 +1,213 @@
+在 Windows 10 上用 avr-gcc 和 avr-libc 给 ATmega328p 编程的整个流程 - 9
+
+前边提到 Timer0 在 Arduino 架构中有特殊的用途 - delay()，所以上一节选做基于 Timer2 的 PWM，但实测的结果，如果不用 Arduino 的 API， 而是用avr-libc的话，所有前边的 Timer2 的程序，只要将里边的寄存器名称中的“2”改为“0”，就都适用于 Timer0。需要特别注意的只有一点 - OC0B 输出对应的是“PD5”（Arduino UNO 的管脚 D5）而不是 Timer2 的“PD3”。
+
+
+这次用 Timer1 来做一下变频 - 就是通过接入Arduino UNO A0 管脚的
+
+电位器来改变 D8 管脚上的 LED 的闪烁频率。
+
+
+设计思路是这样：
+
+1、电位器摆脚接到 Arduino UNO 的 A0（ATmega328p 的 PC0）；
+
+2、LED 经 1.5kΩ 电阻器接到Arduino UNO 的 D8（ATmega328p 的 PB0）；
+
+3、定时器/计数器 Timer1 设置为 CTC（Clear Timer on Compare Match）- 就是，当 TCNT1（Timer/Counter1） 和 OCR1A（Output Compare Register 1 A）两个寄存器的值相等时，定时器的值清零，重新开始计时（数）；
+
+4、开启 全局中断 和 定时器/计数器1比较匹配A（Timer/Counter1 compare match A）中断，中断发生时，切换 LED 的开关状态；
+
+5、将电位器的读数映射到 OCR1A。
+
+
+想要得到的效果是：频率的变化要能从视觉上以 LED 闪烁的形式被观察出来，考虑到人眼的视觉暂留现象，LED 闪烁频率应该在1-25赫兹。16兆赫兹的芯片，最大1024的分频下来，将会是15,625/2赫兹，采用 CTC（Clear Timer on Compare Match） 的定时器运行模式，如果选用八位的 Timer0/Timer2，一个计数周期255，能够得到的最低频率是61.2745×2左右，也就是说，8位的定时器不够用，得用16位的Timer1。
+
+
+16位的Timer1，想要得到1-25赫兹的管脚输出值 Toggle 效果，需要将 CTC 的计数值设为：625/2 - 15625/2。也就是说，为了取整的方便，我选择LED 闪烁频率为 0.5-12.5 赫兹，这样需要将 CTC 的计数值设为：625 - 15625。
+
+
+程序：
+
+/*
+ * The program for adjusting the LED blinking frequency by a potentiometer
+ * chip: ATmega328p
+ * potentiometer --> ADC0
+ * (ATmega328p)PB0 --> 1.5kOhm --> LED
+ */
+ 
+#define F_CPU 16000000UL
+#define VREF 5
+#define POT 10000 // potentiometer - 10Kohm
+
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
+
+volatile uint16_t potVal = 0;
+
+/* Sampling from ADC and then will be Transmitted through USART0 */
+unsigned char digit_0 = 0;
+unsigned char digit_1 = 0;
+unsigned char digit_2 = 0;
+unsigned char digit_3 = 0;
+
+unsigned char helloworld[] = "potValue = ";
+
+void PB0_init();
+void initADC();
+uint16_t readADC(uint8_t);
+
+
+  
+int main(void)
+{       
+    // initialize ADC
+    initADC();
+
+    // LED connected to PB0/D8
+    //PB0_init();
+    DDRB |= (1<<DDB0);
+
+    // initialize timer, interrupt and variable
+    timer1_init();    
+
+    // initialize Serial
+    USART0_init();
+ 
+    // loop forever
+    while(1)
+    {
+      potVal = readADC(0);
+      OCR1A = (potVal/1023.0)*15625;     
+      //PB0_toggle(potVal);
+      regToDigitAndTransmit(potVal); 
+    }
+}
+
+void initADC()
+{
+  // Select V ref=AVcc
+  // Bit 7:6 – REFS1:0: Reference Selection Bits
+  // REFS1 REFS0 - 0 / 1 - AVCC with external capacitor at AREF pin
+  ADMUX |= (1<<REFS0);
+
+  // Bits 2:0 – ADPS2:0: ADC Prescaler Select Bits
+  // These bits determine the division factor between the system clock frequency and the input clock to the ADC.
+  //set prescaler to 128 
+  ADCSRA |= (1<<ADPS2)|(1<<ADPS1)|(1<<ADPS0);
+  // Bit 7 – ADEN: ADC Enable - Writing this bit to one enables the ADC.
+  ADCSRA |= (1<<ADEN);
+
+  // Bit 6 – ADSC: ADC Start Conversion
+  // The first conversion after ADSC has been written after the ADC has been enabled, 
+  // or if ADSC is written at the same time as the ADC is enabled, 
+  // will take 25 ADC clock cycles instead of the normal 13. 
+  // This first conversion performs initialization of the ADC.
+  ADCSRA |= (1<<ADSC);
+}
+
+uint16_t readADC(uint8_t ADCchannel)
+{
+  //select ADC channel with safety mask
+  ADMUX = (ADMUX & 0xF0) | (ADCchannel & 0x0F);
+
+  // A single conversion is started by disabling the power reduction ADC bit, PRADC, by writing a logical zero to it 
+  // and writing a logical one to the ADC start conversion bit, ADSC.
+  ADCSRA |= (1<<ADSC);
+   
+  // wait until ADC conversion is complete
+  while( ADCSRA & (1<<ADSC) );
+  
+  return ADC;
+}
+
+void PB0_init(void){
+   DDRB |= (1<<DDB0);
+}
+
+void PB0_toggle(int t){
+   PORTB ^= (1<<PORTB0); // toggles the led
+   for(int i = 0; i < t; i++){
+     _delay_ms(1);
+   }
+}
+
+void USART0_init(void) {
+    UCSR0A = B00000000; //single transmission speed, multiprocessor disabled
+    UCSR0B = B00011000; //enable Rx & Tx
+    UCSR0C = B00000110; //asynchronous, no parity, 1 stop, 8 bits
+    UBRR0 = 103;        //load the value for 9600 bps baud rate into whole UBRR register
+}
+
+void TX(unsigned char TXData) {
+    //do nothing until UDR0 is ready for more data to be written to it; wait for USART UDRE flag
+    while ((UCSR0A & (1 << UDRE0)) == 0) {}; 
+    //when flag is set send data by placing the byte into UDR0
+    UDR0 = TXData; 
+}
+
+void promptPrint(void){
+  for(int i = 0; i < sizeof(helloworld); i++){
+    TX(helloworld[i]);   //echo back the received byte to the computer
+  }
+  
+  _delay_ms(100);  
+}
+
+unsigned char regToDigitAndTransmit(uint16_t valueADC){
+    digit_0 = valueADC/1000;
+    unsigned char number_0 = digit_0 + 48;
+    digit_1 = (valueADC - (digit_0 * 1000))/100;
+    unsigned char number_1 = digit_1 + 48;
+    digit_2 = (valueADC - (digit_0 * 1000) - (digit_1 * 100))/10;
+    unsigned char number_2 = digit_2 + 48;
+    digit_3 = (valueADC - (digit_0 * 1000) - (digit_1 * 100) - (digit_2 * 10));
+    unsigned char number_3 = digit_3 + 48;
+
+    promptPrint();
+    TX(number_0);
+    TX(number_1);
+    TX(number_2);
+    TX(number_3);
+  TX('.');
+  TX('\n');
+}
+
+// initialize timer, interrupt and variable
+void timer1_init()
+{
+    cli(); //Disable interrupts 
+    // set up timer with prescaler = 1024 and CTC mode
+    // TOP = OCR1A
+    // Update of OCR1A at Immediate
+    TCCR1B |= (1 << WGM12)|(1 << CS12)|(1 << CS10);
+    // Toggle OC1A/OC1B(Arduino UNO D9/D10) on compare match
+    //TCCR1A = (1 << COM1A0);
+
+    // TIMSK1 – Timer/Counter1 Interrupt Mask Register
+    // Bit 0 – TOIE1: Timer/Counter1, Overflow Interrupt Enable
+    // TIMSK1 |= (1<<TOIE1);
+
+    // Bit 1 – OCIE1A: Timer/Counter1, Output Compare A Match Interrupt Enable
+    TIMSK1 |= (1<<OCIE1A);
+  
+    // initialize counter
+    TCNT1 = 0;
+  
+    // initialize compare value
+    OCR1A = 15625;
+    //OCR1A = 625;
+
+    // Enable global interrupt
+    sei();
+}
+
+// Vector No.   Program Address     Source            Interrupt Definition
+//        12             0x0016     TIMER1 COMPA      Timer/Counter1 compare match A
+ISR(TIMER1_COMPA_vect){
+  PORTB ^= (1<<PORTB0); // toggles the led
+}
+
+
+

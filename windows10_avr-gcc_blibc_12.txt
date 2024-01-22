@@ -1,0 +1,311 @@
+在 Windows 10 上用 avr-gcc 和 avr-libc 给 ATmega328p 编程的整个流程 - 12
+
+前言
+用实例演示 Ring Buffer 的功能 —— 两个 ATmega328P 芯片，一个通过 ADC 采集数据，经 uart 传输给另一个，改变另一个连接的 LED 的闪烁频率。
+
+这次的实验是两个 ATmega328P(Arduino UNO)，一个接电位器，另一个接 LED，电位器的 ADC 值经 UART 传至另一块板上，改变第二块板连接的 LED 的闪烁频率。
+
+这次实验的接收端是在前一节的基础上改进地：
+
+/*
+ * main-test-rx.c
+ */ 
+
+#ifndef F_CPU
+#define F_CPU 16000000UL
+#endif
+
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
+
+#include <stdlib.h> //atoi & itoa
+#include <string.h> //strcpy()
+#include <ctype.h> //isdigit()
+
+#include "init.h"
+#include "uart.h"
+#include "ringBuffer.h"
+
+volatile unsigned int sampleTicks = 0;
+char stringFromUART[5] = {'0'};
+uint8_t charGet = '\0';
+unsigned int freqLED = 0;
+
+int main(void)
+{
+  LED_Init();
+  Timer2_Init();
+  uart0_init();
+  ring_head = 0;
+  ring_tail = 0;
+  sei();
+  
+  /* Replace with your application code */
+  while (1)
+  {    
+    if(remove() == 'T')
+    {
+      _delay_ms(1);
+      stringFromUART[0] = remove();
+      _delay_ms(1);
+      stringFromUART[1] = remove();
+      _delay_ms(1);
+      stringFromUART[2] = remove();
+      _delay_ms(1);
+      stringFromUART[3] = remove();
+      _delay_ms(1);
+      stringFromUART[4] = '\0';
+      _delay_ms(1);
+
+      uart0_putString(stringFromUART);
+
+      freqLED = atoi(stringFromUART);
+      freqLED = freqLED/32;  //0-1023 --> 0-32
+      OCR2A = freqLED;
+    }
+
+    //_delay_ms(10);
+    if(sampleTicks >= 125)  //15625=125*125
+    {
+      PORTB ^= (1<<PORTB0);
+      sampleTicks = 0;
+    }
+  }
+}
+
+ISR(TIMER2_COMPA_vect)
+{
+  ++sampleTicks;
+}
+
+ISR(USART_RX_vect)
+{
+  uint8_t dataRecv;
+  dataRecv = UDR0;
+  add(dataRecv);
+}
+
+
+改进的几点是：
+
+1、在 main-test-rx.c 中给 “ring_head” 和 “ring_tail”赋初值：
+
+  ring_head = 0;
+  ring_tail = 0;
+
+
+2、将 Ring Buffer 容积设为最大：
+
+#define RING_SIZE   256  //8-bit MCU
+
+
+
+3、在每次调用 “remove()” 之后，加一个暂缓：
+
+_delay_ms(1);
+
+
+4、LED 的闪烁频率用 Timer2 的 CTC 模式 —— 动态设定 OCR2A 的值：
+
+      freqLED = atoi(stringFromUART);
+      freqLED = freqLED/32;  //0-1023 --> 0-32
+      OCR2A = freqLED;
+
+
+发送端由 5 个文件组成：
+
+1、main-test-tx.c
+
+/*
+ * main-test-tx.c
+ */ 
+
+#ifndef F_CPU
+#define F_CPU 16000000UL // Defining the CPU Frequency
+#endif
+
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
+#include <stdlib.h> //atoi & itoa
+
+#include "ADC.h"
+#include "USART.h"
+
+unsigned int valueADC = 0;
+char stringADC[] = {'1', '2', '3', '4', '\0'}; // 0-1023 + '/0'
+uint8_t freqADC = 0;
+
+
+void Timer0_Init()
+{
+  //Normal Mode - The TOV0 Flag in this case behaves like a ninth bit, except
+  //that it is only set, not cleared. However, combined with the timer overflow interrupt
+  //that automatically clears the TOV0 flag, the timer resolution can be increased by software.
+  
+  TCCR0B |= (1<<CS02) | (0<<CS01) | (1<<CS00); // clkT2S/1024 (from prescaler)
+  TIMSK0 |= (1<<TOIE0); //Timer/Counter0 Overflow Interrupt Enable
+  TCNT0 = (255-125); // 15625=125*125;
+}
+
+
+int main(void)
+{
+  Timer0_Init();  
+  USART0_Init();
+  ADC_Init();
+  
+  sei();
+  
+  _delay_ms(10);
+  
+    /* Replace with your application code */
+    while (1) 
+    {
+    if(freqADC >= 5)
+    {
+      valueADC = ADC_Read(5);
+      itoa(valueADC, stringADC, 10);
+      USART0_putChar('T');
+      USART0_putString(stringADC);
+      
+      freqADC = 0;
+    }
+    _delay_ms(5);
+    }
+}
+
+ISR(TIMER0_OVF_vect)
+{
+  ++freqADC;
+  TCNT0 = (255-125); //15625/125/5=25, 1000/25=40ms
+}
+
+
+其余 4 个文件——ADC.h, ADC.c, UART.h, UART.c 与前面的章节中相同。
+
+#ifndef ADC_H_
+#define ADC_H_
+
+void ADC_Init();
+unsigned int ADC_Read(unsigned char);
+
+#endif /* ADC_H_ */
+
+#include <avr/io.h>
+#include <util/delay.h>
+#include "ADC.h"
+
+void ADC_Init()
+{
+  // set REFS1=0,REFS0=1 (Vref as AVCC pin), ADLAR = 0(right adjusted),
+  // MUX3 to MUX0 is 0000 for ADC0, 0101 for ADC5;
+  ADMUX = 0b01000000;
+  //enable ADC module, ADC Interrupt Enable, set prescalar of 128 which gives CLK/128
+  ADCSRA |= (1<<ADEN) | (1<<ADPS2) | (1<<ADPS1) | (1<<ADPS0);
+}
+
+unsigned int ADC_Read(unsigned char channel)
+{
+  /* set input channel to read */
+  ADMUX = 0x40 | (channel & 0x07);   // 0100 0000 | (channel & 0000 0111)
+  /* Start ADC conversion */
+  ADCSRA |= (1<<ADSC);
+  /* Wait until end of conversion by polling ADC interrupt flag */
+  while (!(ADCSRA & (1<<ADIF)));
+  _delay_ms(1);                      /* Wait a little bit */
+  /* Return ADC word */
+  return ADCW;
+}
+
+
+#include <avr/io.h>
+ 
+#ifndef F_CPU
+#define F_CPU 16000000UL // Defining the CPU Frequency
+#endif
+
+#ifndef USART_H_
+#define USART_H_
+
+//It was tested, lower Baud rate like 9600-2400 didn't work properly in this project
+#define USART_BAUDRATE 250000 // Desired Baud Rate
+#define BAUD_PRESCALER (((F_CPU / (USART_BAUDRATE * 16UL))) - 1)
+
+#define ASYNCHRONOUS (0<<UMSEL00) // USART Mode Selection
+
+#define DISABLED    (0<<UPM00)
+#define EVEN_PARITY (2<<UPM00)
+#define ODD_PARITY  (3<<UPM00)
+#define PARITY_MODE  DISABLED // USART Parity Bit Selection
+
+#define ONE_BIT (0<<USBS0)
+#define TWO_BIT (1<<USBS0)
+#define STOP_BIT ONE_BIT      // USART Stop Bit Selection
+
+#define FIVE_BIT  (0<<UCSZ00)
+#define SIX_BIT   (1<<UCSZ00)
+#define SEVEN_BIT (2<<UCSZ00)
+#define EIGHT_BIT (3<<UCSZ00)
+#define DATA_BIT   EIGHT_BIT  // USART Data Bit Selection
+
+#define RX_COMPLETE_INTERRUPT         (1<<RXCIE0)
+#define DATA_REGISTER_EMPTY_INTERRUPT (1<<UDRIE0)
+
+
+void USART0_Init();
+uint8_t USART0_getChar(void);
+void USART0_putChar(uint8_t DataByte);
+void USART0_putString(char *str);
+
+#endif /* USART_H_ */
+
+#include "USART.h"
+
+void USART0_Init()
+{
+  // Set Baud Rate
+  UBRR0H = BAUD_PRESCALER >> 8;
+  UBRR0L = BAUD_PRESCALER;
+  
+  // Set Frame Format
+  UCSR0C = ASYNCHRONOUS | PARITY_MODE | STOP_BIT | DATA_BIT;
+  
+  // Enable Receiver and Transmitter
+  UCSR0B = (1<<RXEN0) | (1<<TXEN0);
+}
+
+uint8_t USART0_getChar()
+{
+  uint8_t dataRecv;
+  while((UCSR0A & (1<<RXC0)) == 0) {};
+  dataRecv = UDR0;
+  return dataRecv;
+}
+
+void USART0_putChar(uint8_t DataByte)
+{
+  while((UCSR0A & (1<<UDRE0)) == 0) {}; // Do nothing until UDR is ready
+  UDR0 = DataByte;
+  while((UCSR0A & (1<<TXC0)) == 0) {}; // Do nothing until TX is completed
+}
+
+void USART0_putString(char *str)
+{
+  int i = 0;
+  
+  while(str[i] != '\0')
+  {
+    USART0_putChar(str[i]);
+    ++i;
+  }
+  USART0_putChar('\0');
+}
+
+
+项目程序的详细解释在这里：
+
+https://www.bilibili.com/video/BV1tL41127fV/?vd_source=a78c86ab025bf795ccfaa5b6c3e0f480
+
+

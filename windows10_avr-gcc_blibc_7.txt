@@ -1,0 +1,193 @@
+在 Windows 10 上用 avr-gcc 和 avr-libc 给 ATmega328p 编程的整个流程 - 7
+
+前面说到的 Fade ，这一节来做一下基于 Timer2 的 PWM。之所以不用Timer0，是因为在 Arduino 架构中，Timer0 有特殊的用途 - delay()。
+
+
+先是一个 PWM 的测试：
+
+#include <avr/io.h>
+
+/*
+ * A prescaler of 64 results in 249 for top. That’s 250 steps. 
+ * One-fifth of it is 50. Since the counter starts at 0, OCR2B is 49, 
+ * at least theoretically.
+ */
+// Period = 1 ms => Frequenz = 1kHz
+
+void setup(){ 
+  // WGM22/WGM21/WGM20 all set -> Mode 7, fast PWM
+  TCCR2A = (1<<COM2B1) + (1<<WGM21) + (1<<WGM20); // Set OC2B at bottom, clear OC2B at compare match
+  TCCR2B = (1<<CS22) + (1<<WGM22); // prescaler = 64; 
+  OCR2A = 249;
+  OCR2B = 49;
+  DDRD |= (1<<PD3);//D3 - 1.5Kohm - LED - GND
+  } 
+
+void loop() {}
+
+
+测试一下 Fade：
+
+#include <avr/io.h>
+#include <util/delay.h>
+
+void setup(){ 
+  //WGM02/WGM01/WGM00 all set -> Mode 7, fast PWM
+  //TCCR0A = (1<<COM0A1) + (1<<WGM01) + (1<<WGM00); // Set OC0A at bottom, clear OC0A at compare match
+  //TCCR0B = (1<<CS02) + (1<<WGM02); // prescaler = 64; 
+  //OCR0A = 249;
+  //OCR0B = 49;
+  //DDRD |= (1<<PD6);//D6 - 1.5Kohm - LED - GND
+
+  // WGM22/WGM21/WGM20 all set -> Mode 7, fast PWM, TOP = OCR2A
+  // Period = 2 ms / Frequenz = 500 Hz. 
+  //TCCR2A = (1<<COM2A0) + (1<<WGM21) + (1<<WGM20); // Toggle OC2A at compare match
+  //TCCR2B = (1<<CS22) + (1<<WGM22); // prescaler = 64; 
+  //OCR2A = 249;
+  //DDRB |= (1<<PB3); // PB3 = OC2A = Arduino Pin 11
+
+  // Period = 1 ms => Frequenz = 1kHz
+  // WGM22/WGM21/WGM20 all set -> Mode 7, fast PWM
+  TCCR2A = (1<<COM2B1) + (1<<WGM21) + (1<<WGM20); // Set OC2B at bottom, clear OC2B at compare match
+  TCCR2B = (1<<CS22) + (1<<WGM22); // prescaler = 64; 
+  OCR2A = 249;
+  OCR2B = 69;
+  DDRD |= (1<<PD3);
+} 
+
+void loop() {
+  for(int i = 49; i < 250; i++){
+    OCR2B = i;
+    _delay_ms(10);
+  }
+  for(int i = 249; i >= 49; i--){
+    OCR2B = i;
+    _delay_ms(10);
+   }
+ }
+
+
+加上电位器：
+
+#define F_CPU 16000000UL
+#define VREF 5
+#define POT 10000 // potentiometer - ohm10K
+
+#include <avr/io.h>
+#include <util/delay.h>
+
+double potVal=0;
+
+void setup(){
+  Serial.begin(115200);
+  
+  // Period = 1 ms => Frequenz = 1kHz
+  // WGM22/WGM21/WGM20 all set -> Mode 7, fast PWM
+  TCCR2A = (1<<COM2B1) + (1<<WGM21) + (1<<WGM20); // Set OC2B at bottom, clear OC2B at compare match
+  TCCR2B = (1<<CS22) + (1<<WGM22); // prescaler = 64; 
+  OCR2A = 249;
+  OCR2B = 69;
+  DDRD |= (1<<PD3);
+  initADC(); 
+} 
+
+void loop() {
+    potVal=readADC(0);
+    potVal=readADC(0)/1023.0*255;
+    OCR2B=potVal; 
+}
+
+
+// AVR ADC must be clocked at a frequency between 50 and 200kHz. 
+// So we need to set proper prescaller bits so that the scaled system clock would fit in this range. 
+// As our AVR is clocked at 16MHz, 
+// we will use 128 scaling factors by setting ADPS0, ADPS1, and ADPS2 bits in the ADCSRA register. 
+// This gives 16000000/128=125kHz of ADC clock.
+void initADC()
+{
+ // Select Vref=AVcc
+ ADMUX |= (1<<REFS0);
+ //set prescaller to 128 and enable ADC 
+ ADCSRA |= (1<<ADPS2)|(1<<ADPS1)|(1<<ADPS0)|(1<<ADEN);    
+}
+
+uint16_t readADC(uint8_t ADCchannel)
+{
+ //select ADC channel with safety mask
+ ADMUX = (ADMUX & 0xF0) | (ADCchannel & 0x0F);
+ //single conversion mode
+ ADCSRA |= (1<<ADSC);
+ // wait until ADC conversion is complete
+ while( ADCSRA & (1<<ADSC) );
+ return ADC;
+}
+
+演示视频：
+
+
+加上中断：
+
+#define F_CPU 16000000UL
+#define VREF 5
+#define POT 10000 // potentiometer - ohm10K
+
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
+
+volatile double potVal=0;
+
+void setup(){
+  Serial.begin(115200);
+  // Period = 1 ms => Frequenz = 1kHz
+  // WGM22/WGM21/WGM20 all set -> Mode 7, fast PWM
+  TCCR2A = (1<<COM2B1) + (1<<WGM21) + (1<<WGM20); // Set OC2B at bottom, clear OC2B at compare match
+  TCCR2B = (1<<CS22) + (1<<WGM22); // prescaler = 64; 
+  OCR2A = 249;
+  OCR2B = 69;
+  DDRD |= (1<<PD3);
+  initADC();
+  sei();
+}
+
+
+void loop() {
+    potVal=potVal/1023.0*255;
+    Serial.print("potVal = ");
+    Serial.println(potVal);
+    OCR2B=potVal;
+}
+
+void initADC()
+{
+  //select ADC channel ADC0
+  ADMUX &= 0x11110000;
+  // Select Vref=AVcc
+  ADMUX |= (1<<REFS0);
+  //set prescaller to 128 and enable ADC 
+  ADCSRA |= (1<<ADPS2)|(1<<ADPS1)|(1<<ADPS0)|(1<<ADEN);
+  // Bit 6 – ADSC: ADC Start Conversion
+  // In single conversion mode, write this bit to one to start each conversion. 
+  // In free running mode, write this bit to one to start the first conversion.
+  ADCSRA |= (1<<ADSC);
+  // Bit 3 – ADIE: ADC Interrupt Enable
+  // When this bit is written to one and the I-bit in SREG is set, the ADC conversion complete interrupt is activated.
+  ADCSRA |= (1<<ADIE);
+  // Bit 5 – ADATE: ADC Auto Trigger Enable
+  // When this bit is written to one, auto triggering of the ADC is enabled. 
+  // The ADC will start a conversion on a positive edge of the selected trigger signal. 
+  // The trigger source is selected by setting the ADC trigger select bits, ADTS in ADCSRB.
+  ADCSRA |= (1<<ADATE); 
+  //In free running mode, the ADC is constantly sampling and updating the ADC Data Registers.  
+  //This mode is selected by the ADFR bit in the ADC Control and Status Register.
+  ADCSRB = 0x00000000;// Free running mode - ADTS2=ADTS1=ADTS0=0;  
+}
+
+ISR(ADC_vect){
+  potVal=ADC;
+  //_delay_ms(10);
+}
+   
+
+演示视频：
+

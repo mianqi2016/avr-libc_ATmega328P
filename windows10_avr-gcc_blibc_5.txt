@@ -1,0 +1,148 @@
+在 Windows 10 上用 avr-gcc 和 avr-libc 给 ATmega328p 编程的整个流程 - 5
+
+Bling、Toggle 和 Fade。
+
+
+在“Windows Powershell ISE(X86)”中：
+
+PS C:\Users\MQ> d:
+
+PS D:\> ls
+
+
+    目录: D:\
+
+
+Mode                 LastWriteTime         Length Name                                                                
+----                 -------------         ------ ----                                                                
+...                                                   
+d-----         2022/7/28     11:20                Projects_avr-libc                                                   
+...                                            
+
+PS D:\> cd Projects_avr-libc
+
+PS D:\Projects_avr-libc> ls
+
+
+    目录: D:\Projects_avr-libc
+
+
+Mode                 LastWriteTime         Length Name                                                                
+----                 -------------         ------ ----                                                                
+d-----         2022/7/29      8:50                000 - ledToggle                                                     
+d-----         2022/7/28     11:26                AVR-GCC                                                             
+
+
+
+PS D:\Projects_avr-libc> cd '000 - ledToggle'
+
+PS D:\Projects_avr-libc\000 - ledToggle> ls
+
+
+    目录: D:\Projects_avr-libc\000 - ledToggle
+
+
+Mode                 LastWriteTime         Length Name                                                                
+----                 -------------         ------ ----                                                                
+d-----         2022/7/28     12:01                .vscode                                                             
+...                                                
+-a----         2022/7/29      8:50            594 testLedBlinkAVRlibc.c                                               
+-a----         2022/7/29      8:50           2308 testLedBlinkAVRlibc.o                                               
+
+
+PS D:\Projects_avr-libc\000 - ledToggle>
+
+
+
+在名为 “testLedBlinkAVRlibc” 的文本文件中输入：
+
+// A program for LED Blink on ATmega328p
+
+ /*
+ * LED - 1.5Kohm - D8(PB0/PCINT0)
+ */
+
+#ifndef __AVR_ATmega328P__
+#define __AVR_ATmega328P__
+#endif
+
+#define F_CPU 16000000
+
+#include <avr/io.h>
+#include <util/delay.h>
+#include <stdbool.h>
+
+#define BLINK_MS 500
+
+int main(){
+
+    DDRB |=  0b00000001;
+    //DDRB |= (1 << PORTB0);
+    //DDRB |= _BV(PORTB0);
+
+    while(true){
+        PORTB |= 0b00000001;
+        _delay_ms(BLINK_MS);
+
+        PORTB &= ~0b00000001;
+        _delay_ms(BLINK_MS);
+
+        //PORTB ^= _BV(PORTB0);
+        //_delay_ms(BLINK_MS);
+    }
+}
+
+
+将其另存为: “testLedBlinkAVRlibc.c”。
+
+编译：
+
+ avr-gcc -mmcu=atmega328p -c testLedToggleAVRlibc-1.c
+
+
+生成文件：
+
+testLedBlinkAVRlibc-1.o 
+
+
+再测试一下第二段代码：
+
+#define F_CPU 16000000UL
+
+#include <avr/io.h>
+#include <util/delay.h>
+#include <avr/interrupt.h>
+#include <stdbool.h>
+
+volatile uint8_t pinb = 0;
+
+int main(void){
+  sei();  // call sei() to switch on the interrupting system
+  //DDRB &= ~(1<<DDB0);
+  DDRB |= (1<<PINB0);
+  //DDRD |= (1<<DDD7);
+  DDRD &= ~(1<<PIND7);
+
+  PCICR = (1<<PCIE2);
+  //PCICR = 0x00000100; // Pin Change Interrupt Enable 2
+  PCMSK2 = (1<<PCINT23);  //0x10000000; PCINT23 enabled
+  //PCMSK2 = (1<<PIND7);
+
+  while(true){
+    ;
+  }
+}
+
+ISR(PCINT2_vect)
+{
+  //pinb = PINB;
+  //PORTB = PINB ^ pinb;
+
+  // Method-1:
+  //PINB = (1 << PINB0);
+  
+  // Method-2:
+  uint8_t rising = PIND & (1 << 7);
+  if (rising) PORTB ^= (1 << 0);
+}
+ 
