@@ -1,1 +1,225 @@
+/* 
+ * Sensorless brushless DC (BLDC) motor control with Arduino UNO and L6234 driver.
+ * This is a free software with NO WARRANTY.
+ * http://simple-circuit.com/
+ */
 
+ /*
+  *  “DMOS” - meaning “Double-diffused MOS”
+  */
+ 
+#define SPEED_UP          A0
+#define SPEED_DOWN        A1
+
+#define PWM_MAX_DUTY      255
+#define PWM_MIN_DUTY      100
+#define PWM_START_DUTY    100
+ 
+byte bldc_step = 0, motor_speed = 0;
+unsigned long int i = 0;
+
+void setup() {
+  DDRB  |= 0x0E;  // Configure pins 9, 10 and 11 as outputs
+  PORTB  = 0x00;
+  DDRD  |= 0x38;  // Configure pins 3, 4 and 5 as outputs
+  PORTD  = 0x00;
+
+  // Timer1 module setting: set clock source to clkI/O / 1 (no prescaling)
+  TCCR1A = 0;
+  TCCR1B = 0x01;  //CS12 CS11 CS10 - 0 0 1 clk I/O/1 (no prescaling)
+  // Timer2 module setting: set clock source to clkI/O / 1 (no prescaling)
+  TCCR2A = 0;
+  TCCR2B = 0x01;  //CS22 CS21 CS20 - 0 0 1 clk T2S/1 (no prescaling)
+
+  // Analog comparator setting - ACSR – Analog Comparator Control and Status Registe
+  // ACD ACBG ACO ACI ACIE ACIC ACIS1 ACIS0
+  // Bit 4 – ACI: Analog Comparator Interrupt Flag - ACI is cleared by writing a logic one to the flag.
+  ACSR   = 0x10;           // Disable and clear (flag bit) analog comparator interrupt
+
+  pinMode(SPEED_UP,   INPUT_PULLUP);
+  pinMode(SPEED_DOWN, INPUT_PULLUP);
+
+  sei();  //Enable global interrupt
+}
+
+// Analog comparator ISR
+ISR (ANALOG_COMP_vect) {
+  // BEMF debounce
+  for(byte i = 0; i < 10; i++) { 
+    if(bldc_step & 1){  // bldc_step = 1,3,5
+      if(!(ACSR & 0x20)) i -= 1; }  
+      // 0x20 = 0b0010 0000 = Bit 4 – ACI: Bit 5 – ACO: Analog Comparator Output
+      // The output of the analog comparator is synchronized and then directly connected to ACO.
+    else {  // bldc_step = 0,2,4
+      if((ACSR & 0x20)) i -= 1; } 
+    } 
+    bldc_move(); 
+    //delay(6);
+    bldc_step++; 
+    bldc_step %= 6; 
+    } 
+    
+void bldc_move(){ // BLDC motor commutation function 
+  switch(bldc_step){ 
+    case 0: 
+      AH_BL(); 
+      BEMF_C_RISING(); 
+    break; 
+    
+    case 1: 
+      AH_CL(); 
+      BEMF_B_FALLING(); 
+    break; 
+    
+    case 2: 
+      BH_CL(); 
+      BEMF_A_RISING(); 
+    break; 
+    
+    case 3: 
+      BH_AL(); 
+      BEMF_C_FALLING(); 
+    break; 
+    
+    case 4: 
+      CH_AL(); 
+      BEMF_B_RISING(); 
+    break; 
+    
+    case 5: 
+      CH_BL(); 
+      BEMF_A_FALLING(); 
+    break; 
+    } 
+  } 
+  
+void loop() { 
+  SET_PWM_DUTY(PWM_START_DUTY); // Setup starting PWM with duty cycle = PWM_START_DUTY 
+
+  i = 50000; // Motor start 
+  while(i > 100) {
+    delayMicroseconds(i);
+    bldc_move();
+    bldc_step++;
+    bldc_step %= 6;
+    i = i - 20;
+  }
+
+  motor_speed = PWM_START_DUTY;
+  ACSR |= 0x08; // Enable analog comparator interrupt - Bit 3 – ACIE: Analog Comparator Interrupt Enable
+  SET_PWM_DUTY(PWM_MIN_DUTY);
+
+  while(1) {
+    while(!(digitalRead(SPEED_UP)) && motor_speed < PWM_MAX_DUTY){ 
+      motor_speed++; 
+      SET_PWM_DUTY(motor_speed); 
+      //delay(1);
+      delayMicroseconds(500);
+      } 
+    while(!(digitalRead(SPEED_DOWN)) && motor_speed > PWM_MIN_DUTY){
+      motor_speed--;
+      SET_PWM_DUTY(motor_speed);
+      //delay(1);
+      delayMicroseconds(500);
+    }
+    SET_PWM_DUTY(motor_speed);
+    bldc_move();
+    delayMicroseconds(3500);
+    bldc_step++;
+    bldc_step %= 6; 
+  }
+}
+ 
+void BEMF_A_RISING(){
+  ADCSRB = (0 << ACME);   // Select AIN1 as comparator negative input
+  // Bit 6 – ACME: Analog Comparator Multiplexer Enable
+  // When this bit is written logic zero, AIN1 is applied to the negative input of the Analog Comparator.
+  ACSR |= 0x03;           // Set interrupt on rising edge
+  // ACIS1 ACIS0 - 1 1 Comparator interrupt on rising output edge.
+}
+void BEMF_A_FALLING(){
+  ADCSRB = (0 << ACME);   // Select AIN1 as comparator negative input
+  ACSR &= ~0x01;          // Set interrupt on falling edge
+  ACSR = 0x02;
+}
+void BEMF_B_RISING(){
+  ADCSRA = (0 << ADEN);   // Disable the ADC module
+  ADCSRB = (1 << ACME);
+  // Bit 6 – ACME: Analog Comparator Multiplexer Enable
+  // When this bit is written logic one and the ADC is switched off (ADEN in ADCSRA is zero), 
+  // the ADC multiplexer selects the negative input to the Analog Comparator.
+  ADMUX = 2;              // Select analog channel 2 as comparator negative input
+  ACSR |= 0x03;           // Set interrupt on rising edge
+}
+void BEMF_B_FALLING(){
+  ADCSRA = (0 << ADEN);   // Disable the ADC module
+  ADCSRB = (1 << ACME);
+  ADMUX = 2;              // Select analog channel 2 as comparator negative input
+  ACSR &= ~0x01;
+  ACSR = 0x02;
+}
+void BEMF_C_RISING(){
+  ADCSRA = (0 << ADEN);   // Disable the ADC module
+  ADCSRB = (1 << ACME);
+  ADMUX = 3;              // Select analog channel 3 as comparator negative input
+  ACSR |= 0x03;
+}
+void BEMF_C_FALLING(){
+  ADCSRA = (0 << ADEN);   // Disable the ADC module
+  ADCSRB = (1 << ACME);
+  ADMUX = 3;              // Select analog channel 3 as comparator negative input
+  ACSR &= ~0x01;
+  ACSR = 0x02;
+}
+ 
+void AH_BL(){
+  PORTB  =  0x04;
+  PORTD &= ~0x18;
+  PORTD |=  0x20;
+  TCCR1A =  0;            // Turn pin 11 (OC2A) PWM ON (pin 9 & pin 10 OFF)
+  TCCR2A =  0x81;         //
+}
+void AH_CL(){
+  PORTB  =  0x02;
+  PORTD &= ~0x18;
+  PORTD |=  0x20;
+  TCCR1A =  0;            // Turn pin 11 (OC2A) PWM ON (pin 9 & pin 10 OFF)
+  TCCR2A =  0x81;         //
+}
+void BH_CL(){
+  PORTB  =  0x02;
+  PORTD &= ~0x28;
+  PORTD |=  0x10;
+  TCCR2A =  0;            // Turn pin 10 (OC1B) PWM ON (pin 9 & pin 11 OFF)
+  TCCR1A =  0x21;         //
+}
+void BH_AL(){
+  PORTB  =  0x08;
+  PORTD &= ~0x28;
+  PORTD |=  0x10;
+  TCCR2A =  0;            // Turn pin 10 (OC1B) PWM ON (pin 9 & pin 11 OFF)
+  TCCR1A =  0x21;         //
+}
+void CH_AL(){
+  PORTB  =  0x08;
+  PORTD &= ~0x30;
+  PORTD |=  0x08;
+  TCCR2A =  0;            // Turn pin 9 (OC1A) PWM ON (pin 10 & pin 11 OFF)
+  TCCR1A =  0x81;         //
+}
+void CH_BL(){
+  PORTB  =  0x04;
+  PORTD &= ~0x30;
+  PORTD |=  0x08;
+  TCCR2A =  0;            // Turn pin 9 (OC1A) PWM ON (pin 10 & pin 11 OFF)
+  TCCR1A =  0x81;         //
+}
+
+ 
+void SET_PWM_DUTY(byte duty){
+  if(duty < PWM_MIN_DUTY) duty = PWM_MIN_DUTY; 
+  if(duty > PWM_MAX_DUTY) duty = PWM_MAX_DUTY;
+  OCR1A  = duty;                   // Set pin 9  PWM duty cycle
+  OCR1B  = duty;                   // Set pin 10 PWM duty cycle
+  OCR2A  = duty;                   // Set pin 11 PWM duty cycle
+}
